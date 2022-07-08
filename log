@@ -1,0 +1,34 @@
+
+
+X.Org X Server 1.21.1.3
+X Protocol Version 11, Revision 0
+Current Operating System: Linux arch 5.18.9-zen1-1-zen #1 ZEN SMP PREEMPT_DYNAMIC Sat, 02 Jul 2022 21:03:08 +0000 x86_64
+Kernel command line: BOOT_IMAGE=/boot/vmlinuz-linux-zen root=UUID=8aa67819-23dc-4d59-9f27-1c508be07205 rw loglevel=3 quiet
+ 
+Current version of pixman: 0.40.0
+	Before reporting problems, check http://wiki.x.org
+	to make sure that you have the latest version.
+Markers: (--) probed, (**) from config file, (==) default setting,
+	(++) from command line, (!!) notice, (II) informational,
+	(WW) warning, (EE) error, (NI) not implemented, (??) unknown.
+(==) Log file: "/home/jani/.local/share/xorg/Xorg.0.log", Time: Fri Jul  8 11:04:11 2022
+(==) Using system config directory "/usr/share/X11/xorg.conf.d"
+
+1
+
+(nitrogen:13890): Gtk-WARNING **: 11:04:12.087: Unable to locate theme engine in module_path: "adwaita",
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1227: Unable to locate image file in pixmap_path: "assets/entry-background.png"
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1228: Background image options specified without filename
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1240: Unable to locate image file in pixmap_path: "assets/entry-background.png"
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1241: Background image options specified without filename
+Zlyhalo pripojenie k správcovi relácie: 1Nepodarilo sa pripojiť k správcovi sedenia: SESSION_MANAGER environment variable not defined
+
+(nitrogen:13890): Gtk-WARNING **: 11:04:12.310: Unable to locate theme engine in module_path: "adwaita",
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1227: Unable to locate image file in pixmap_path: "assets/entry-background.png"
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1228: Background image options specified without filename
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1240: Unable to locate image file in pixmap_path: "assets/entry-background.png"
+/home/jani/.themes/Flat-Remix-GTK-Blue-Darkest-Solid/gtk-2.0/main.rc:1241: Background image options specified without filename
+xinit: connection to X server lost
+
+waiting for X server to shut down (II) Server terminated successfully (0). Closing log file.
+
