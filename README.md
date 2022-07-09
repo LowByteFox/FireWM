@@ -27,3 +27,6 @@ Add the following line to your .xinitrc to start dwm using startx:
 ```sh
 exec dwm
 ```
+
+## FireWM API
+Now FireWM has it's own API, which allows you to change values such as alpha of bar or even gaps while FireWM is runnig!
