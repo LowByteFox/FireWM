@@ -34,6 +34,7 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/epoll.h>
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
@@ -95,9 +96,21 @@ enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms *
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkButton, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
 
+typedef struct TagState TagState;
+struct TagState {
+	int selected;
+	int occupied;
+	int urgent;
+};
+
+typedef struct ClientState ClientState;
+struct ClientState {
+	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen;
+};
+
 typedef union {
-	int i;
-	unsigned int ui;
+	long i;
+	unsigned long ui;
 	float f;
 	const void *v;
 } Arg;
@@ -127,6 +140,7 @@ struct Client {
 	Client *snext;
 	Monitor *mon;
 	Window win;
+	ClientState prevstate;
 };
 
 typedef struct {
@@ -144,6 +158,7 @@ typedef struct {
 typedef struct Pertag Pertag;
 struct Monitor {
 	char ltsymbol[16];
+	char lastltsymbol[16];
 	float mfact;
 	int nmaster;
 	int num;
@@ -154,14 +169,17 @@ struct Monitor {
 	unsigned int seltags;
 	unsigned int sellt;
 	unsigned int tagset[2];
+	TagState tagstate;
 	int showbar;
 	int topbar;
 	Client *clients;
 	Client *sel;
+	Client *lastsel;
 	Client *stack;
 	Monitor *next;
 	Window barwin;
 	const Layout *lt[2];
+	const Layout *lastlt;
 	int ltcur; /* current layout */
 	Pertag *pertag;
 };
@@ -220,6 +238,7 @@ static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
 static unsigned int getsystraywidth();
 static void grabbuttons(Client *c, int focused);
 static void grabkeys(void);
+static int handlexevent(struct epoll_event *ev);
 static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
 static void killclient(const Arg *arg);
@@ -250,8 +269,10 @@ static void setfullscreen(Client *c, int fullscreen);
 static void layoutscroll(const Arg *arg);
 static void setgaps(const Arg *arg);
 static void setlayout(const Arg *arg);
+static void setlayoutsafe(const Arg *arg);
 static void setmfact(const Arg *arg);
 static void setup(void);
+static void setupepoll(void);
 static void seturgent(Client *c, int urg);
 static void showhide(Client *c);
 static void sigchld(int unused);
@@ -295,6 +316,11 @@ static int xerrordummy(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void xinitvisual();
 static void zoom(const Arg *arg);
+
+// FireWM related API
+static void firesetalpha(const Arg *arg);
+static void firesetgaps(const Arg *arg);
+
 static void autostart_exec(void);
 static void centeredmaster(Monitor *m);
 static void centeredfloatingmaster(Monitor *m);
@@ -330,13 +356,15 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[UnmapNotify] = unmapnotify
 };
 static Atom wmatom[WMLast], netatom[NetLast], xatom[XLast];
+static int epoll_fd;
+static int dpy_fd;
 static int restart = 0;
 static int running = 1;
 static Cur *cursor[CurLast];
 static Clr **scheme;
 static Display *dpy;
 static Drw *drw;
-static Monitor *mons, *selmon;
+static Monitor *mons, *selmon, *lastselmon;
 static Window root, wmcheckwin;
 
 static Systray *systray = NULL;
@@ -347,8 +375,16 @@ static Visual *visual;
 static int depth;
 static Colormap cmap;
 
+#include "ipc.h"
+
 /* configuration, allows nested code to access above variables */
 #include "config.h"
+
+#ifdef VERSION
+#include "IPCClient.c"
+#include "yajl_dumps.c"
+#include "ipc.c"
+#endif
 
 struct Pertag {
 	unsigned int curtag, prevtag; /* current and previous tag */
@@ -625,6 +661,12 @@ cleanup(void)
 	XSync(dpy, False);
 	XSetInputFocus(dpy, PointerRoot, RevertToPointerRoot, CurrentTime);
 	XDeleteProperty(dpy, root, netatom[NetActiveWindow]);
+
+	ipc_cleanup();
+
+	if (close(epoll_fd) < 0) {
+			fprintf(stderr, "Failed to close epoll file descriptor\n");
+	}
 }
 
 void
@@ -1309,6 +1351,25 @@ grabkeys(void)
 	}
 }
 
+int
+handlexevent(struct epoll_event *ev)
+{
+	if (ev->events & EPOLLIN) {
+		XEvent ev;
+		while (running && XPending(dpy)) {
+			XNextEvent(dpy, &ev);
+			if (handler[ev.type]) {
+				handler[ev.type](&ev); /* call handler */
+				ipc_send_events(mons, &lastselmon, selmon);
+			}
+		}
+	} else if (ev-> events & EPOLLHUP) {
+		return -1;
+	}
+
+	return 0;
+}
+
 void
 incnmaster(const Arg *arg)
 {
@@ -1803,12 +1864,40 @@ restack(Monitor *m)
 void
 run(void)
 {
-	XEvent ev;
-	/* main event loop */
+	int event_count = 0;
+	const int MAX_EVENTS = 10;
+	struct epoll_event events[MAX_EVENTS];
+
 	XSync(dpy, False);
-	while (running && !XNextEvent(dpy, &ev))
-		if (handler[ev.type])
-			handler[ev.type](&ev); /* call handler */
+
+	/* main event loop */
+	while (running) {
+		event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+
+		for (int i = 0; i < event_count; i++) {
+			int event_fd = events[i].data.fd;
+			DEBUG("Got event from fd %d\n", event_fd);
+
+			if (event_fd == dpy_fd) {
+				// -1 means EPOLLHUP
+				if (handlexevent(events + i) == -1)
+					return;
+			} else if (event_fd == ipc_get_sock_fd()) {
+				ipc_handle_socket_epoll_event(events + i);
+			} else if (ipc_is_client_registered(event_fd)){
+				if (ipc_handle_client_epoll_event(events + i, mons, &lastselmon, selmon,
+							tags, LENGTH(tags), layouts, LENGTH(layouts)) < 0) {
+					fprintf(stderr, "Error handling IPC event on fd %d\n", event_fd);
+				}
+			} else {
+				fprintf(stderr, "Got event from unknown fd %d, ptr %p, u32 %d, u64 %lu",
+						event_fd, events[i].data.ptr, events[i].data.u32,
+						events[i].data.u64);
+				fprintf(stderr, " with events %d\n", events[i].events);
+				return;
+			}
+		}
+	}
 }
 
 void
@@ -1980,6 +2069,18 @@ setlayout(const Arg *arg)
 		drawbar(selmon);
 }
 
+void
+setlayoutsafe(const Arg *arg)
+{
+	const Layout *ltptr = (Layout *)arg->v;
+	if (ltptr == 0)
+			setlayout(arg);
+	for (int i = 0; i < LENGTH(layouts); i++) {
+		if (ltptr == &layouts[i])
+			setlayout(arg);
+	}
+}
+
 /* arg > 1.0 will set mfact absolutely */
 void
 setmfact(const Arg *arg)
@@ -2084,8 +2185,37 @@ setup(void)
 	XSelectInput(dpy, root, wa.event_mask);
 	grabkeys();
 	focus(NULL);
+	setupepoll();
 }
 
+void
+setupepoll(void)
+{
+	epoll_fd = epoll_create1(0);
+	dpy_fd = ConnectionNumber(dpy);
+	struct epoll_event dpy_event;
+
+	// Initialize struct to 0
+	memset(&dpy_event, 0, sizeof(dpy_event));
+
+	DEBUG("Display socket is fd %d\n", dpy_fd);
+
+	if (epoll_fd == -1) {
+		fputs("Failed to create epoll file descriptor", stderr);
+	}
+
+	dpy_event.events = EPOLLIN;
+	dpy_event.data.fd = dpy_fd;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, dpy_fd, &dpy_event)) {
+		fputs("Failed to add display file descriptor to epoll", stderr);
+		close(epoll_fd);
+		exit(1);
+	}
+
+	if (ipc_init(ipcsockpath, epoll_fd, ipccommands, LENGTH(ipccommands)) < 0) {
+		fputs("Failed to initialize IPC\n", stderr);
+	}
+}
 
 void
 seturgent(Client *c, int urg)
@@ -2781,10 +2911,18 @@ updatesystrayiconstate(Client *i, XPropertyEvent *ev)
 void
 updatetitle(Client *c)
 {
+	char oldname[sizeof(c->name)];
+	strcpy(oldname, c->name);
+
 	if (!gettextprop(c->win, netatom[NetWMName], c->name, sizeof c->name))
 		gettextprop(c->win, XA_WM_NAME, c->name, sizeof c->name);
 	if (c->name[0] == '\0') /* hack to mark broken clients */
 		strcpy(c->name, broken);
+
+	for (Monitor *m = mons; m; m = m->next) {
+		if (m->sel == c && strcmp(oldname, c->name) != 0)
+			ipc_focused_title_change_event(m->num, c->win, oldname, c->name);
+	}
 }
 
 void
@@ -3008,6 +3146,40 @@ zoom(const Arg *arg)
 		if (!c || !(c = nexttiled(c->next)))
 			return;
 	pop(c);
+}
+
+void
+firesetalpha(const Arg *arg)
+{
+	int i;
+	for (i = 0; i < 2; i++) alphas[i][1] = arg->ui;
+
+	scheme = ecalloc(LENGTH(colors), sizeof(Clr *));
+	for (i = 0; i < LENGTH(colors); i++)
+		scheme[i] = drw_scm_create(drw, colors[i], alphas[i], 3);
+	/* init bars */
+	updatebars();
+	updatestatus();
+	updatebarpos(selmon);
+	updatesystray(0);
+}
+
+void
+firesetgaps(const Arg *arg)
+{
+	selmon->gappx = arg->ui;
+
+	sidepad = selmon->gappx;
+	vertpad = selmon->gappx;
+	sp = sidepad;
+	vp = (topbar == 1) ? vertpad : - vertpad;
+
+	Screen *src = ScreenOfDisplay(dpy, screen);
+
+	XMoveWindow(dpy, selmon->barwin, selmon->gappx, selmon->gappx);
+	XResizeWindow(dpy, selmon->barwin, src->width - 2 * selmon->gappx, bh);
+	updatesystray(1);
+	arrange(selmon);
 }
 
 int

@@ -8,7 +8,7 @@
 
 # Change the value of LOCATION to match your city
 dwm_weather() {
-    LOCATION=Kosice
+    LOCATION=London
 
     if [ "$IDENTIFIER" = "unicode" ]; then
         DATA=$(curl -s wttr.in/$LOCATION?format=1)
