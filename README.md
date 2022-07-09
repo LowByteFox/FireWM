@@ -25,7 +25,7 @@ sudo USER=`whoami` make clean install
 Add the following line to your .xinitrc to start dwm using startx:
 
 ```sh
-exec dwm
+exec firewm
 ```
 
 ## FireWM API
