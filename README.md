@@ -1,5 +1,5 @@
 # FireWM
-Lightweight Window manager made in C for X 
+Lightweight Window manager made in C for X <br>
 Created as fork of [DWM](https://dwm.suckless.org/)
 
 ### dependencies
