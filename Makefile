@@ -1,5 +1,5 @@
 # firewm - dynamic window manager
-# See LICENSE file for copyright and license details.
+# See LICENSE.dwm file for copyright and license details.
 
 include config.mk
 
