@@ -1,4 +1,4 @@
-/* See LICENSE file for copyright and license details. */
+/* See LICENSE.dwm file for copyright and license details. */
 
 #define ICONSIZE 16   /* icon size */
 #define ICONSPACING 5 /* space between icon and title */
