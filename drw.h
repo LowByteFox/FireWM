@@ -1,4 +1,4 @@
-/* See LICENSE file for copyright and license details. */
+/* See LICENSE.dwm file for copyright and license details. */
 
 typedef struct {
 	Cursor cursor;
