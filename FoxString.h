@@ -1,6 +1,6 @@
 /*
  * FoxString - Easy to use string implementation in C/C++
- * Copyright (C) 20022 Fire-The-Fox
+ * Copyright (C) 2022 Fire-The-Fox
  *
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
