@@ -1,5 +1,5 @@
 # firewm version
-VERSION = 1.0
+VERSION = 6.3
 
 # Customize below to fit your system
 
@@ -25,10 +25,9 @@ FREETYPEINC = /usr/include/freetype2
 YAJLLIBS = -lyajl
 YAJLINC = /usr/include/yajl
 
-
 # includes and libs
 INCS = -I${X11INC} -I${FREETYPEINC} -I${YAJLINC}
-LIBS = -L${X11LIB} -lX11 ${XINERAMALIBS} ${FREETYPELIBS}  -lXrender -lImlib2 -Llib -lFoxString -ljson-c  ${YAJLLIBS}
+LIBS = -L${X11LIB} -lX11 ${XINERAMALIBS} ${FREETYPELIBS}  -lXrender -lImlib2 -Llib -lFoxString -ljson-c  ${YAJLLIBS} -lpthread
 
 # flags
 CPPFLAGS = -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DVERSION=\"${VERSION}\" ${XINERAMAFLAGS}
