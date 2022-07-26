@@ -47,3 +47,9 @@ to change alpha of bar run:
 # recommended maximum number is 255 but nothing will happen if you provide higher number
 firewm-msg run_command firesetalpha {opacity}
 ```
+
+## Changelog
+* Removed few patches
+* Added bar layout
+* Renamed few variables
+* Added separated color for border
