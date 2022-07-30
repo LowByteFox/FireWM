@@ -48,7 +48,12 @@ to change alpha of bar run:
 firewm-msg run_command firesetalpha {opacity}
 ```
 
-# Screenshots
+## Screenshots
+
+## Known bugs
+It looks like icon patch doesn't like changing monitors; for example turning one off using xrandr
+Make sure when setting status color that you also provide foreground; ^#FF3333:#000000
+
 
 ## Changelog
 * Now you can set color to the status bar
