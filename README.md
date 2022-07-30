@@ -48,6 +48,8 @@ to change alpha of bar run:
 firewm-msg run_command firesetalpha {opacity}
 ```
 
+# Screenshots
+
 ## Changelog
 * Now you can set color to the status bar
 * Fixed bugs
