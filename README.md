@@ -51,7 +51,7 @@ firewm-msg run_command firesetalpha {opacity}
 ## Screenshots
 
 ## Known bugs
-It looks like icon patch doesn't like changing monitors; for example turning one off using xrandr
+It looks like icon patch doesn't like changing monitors; for example turning one off using xrandr <br>
 Make sure when setting status color that you also provide foreground; ^#FF3333:#000000
 
 
