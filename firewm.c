@@ -52,6 +52,7 @@
 #include "drw.h"
 #include "util.h"
 #include "FoxString.h"
+#include "FoxBox.h"
 
 /* macros */
 #define BUTTONMASK              (ButtonPressMask|ButtonReleaseMask)
@@ -88,7 +89,7 @@
 
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
-enum { SchemeNorm, SchemeSel }; /* color schemes */
+enum { SchemeNorm, SchemeSel, SchemeTemp }; /* color schemes */
 enum { NetSupported, NetSystemTray, NetSystemTrayOP, NetSystemTrayOrientation, NetSystemTrayVisual,
        NetWMName, NetWMIcon, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType, NetWMWindowTypeDock, NetSystemTrayOrientationHorz,
@@ -317,6 +318,8 @@ static void zoom(const Arg *arg);
 // FireWM custom functions
 
 int checkColor(char* color);
+int betterstatus_length(char *text);
+char* betterstatus(char *text, int x);
 
 // FireWM related API
 
@@ -983,9 +986,11 @@ drawbar(Monitor *m)
 	if (!m->showbar)
 		return;
 
-	// drw_setscheme(drw, scheme[selmon->sel == NULL ? SchemeNorm : SchemeSel]);
+	if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
+		strcpy(stext, "firewm-"VERSION);
+
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text(drw, 0, 0, m->ww, bh, 0, "", 0); /* draw background */
+	drw_text(drw, 0, 0, selmon->ww, bh, 0, "", 0);
 
 	showsystray = 0;
 	showtags = 0;
@@ -1049,9 +1054,7 @@ drawbar(Monitor *m)
 						drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
 						drw_text(drw, mid, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
 						if (occ & 1 << i)
-							drw_rect(drw, mid + boxw, 0, w - ( 2 * boxw + 1), boxw,
-								m == selmon && selmon->sel && selmon->sel->tags & 1 << i,
-								urg & 1 << i);
+							drw_rect(drw, mid + boxw, bh-3, w - ( 2 * boxw ), boxw, 1, 0);
 						mid += w;
 					}
 				} else {
@@ -1060,9 +1063,7 @@ drawbar(Monitor *m)
 						drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
 						drw_text(drw, x, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
 						if (occ & 1 << i)
-							drw_rect(drw, x + boxw, 0, w - ( 2 * boxw + 1), boxw,
-								m == selmon && selmon->sel && selmon->sel->tags & 1 << i,
-								urg & 1 << i);
+							drw_rect(drw, x + boxw, bh-3, w - ( 2 * boxw ), boxw, 1, 0);
 						x += w;
 					}
 				}
@@ -1113,14 +1114,18 @@ drawbar(Monitor *m)
 			case 's':
 				/* draw status first so it can be overdrawn by tags later */
 				if (m == selmon) { /* status is only drawn on selected monitor */
-					mid = (selmon->ww - TEXTW(stext)) / 2;
 					// drw_setscheme(drw, scheme[selmon->sel == NULL ? SchemeNorm : SchemeSel]);
 					drw_setscheme(drw, scheme[SchemeNorm]);
-					tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-					if (center == 's')
-						drw_text(drw, mid, 0, tw, bh, 0, stext, 0);
-					else
-						x = drw_text(drw, m->ww - (2 * sp) - tw - stw, 0, tw, bh, 0, stext, 0);
+					tw = betterstatus_length(stext) - lrpad; /* 2px right padding */
+					mid = (selmon->ww - tw) / 2;
+					if (center == 's') {
+						betterstatus(stext, mid);
+						// drw_text(drw, mid, 0, tw, bh, 0, text, 0);
+					} else {
+						char *text = betterstatus(stext, m->ww - ( 2 * sp ) - tw - stw);
+						// x = //drw_text(drw, m->ww - (2 * sp) - tw - stw, 0, tw, bh, 0, text, 0);
+						x = TEXTW(text);
+					}
 				}
 				break;
 
@@ -1133,11 +1138,10 @@ drawbar(Monitor *m)
 						// TODO: Create notification that systray cannot be in center
 					drw_rect(drw, m->ww - stw, 0, stw, bh, 1, 1);
 				}
+				drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 				break;
 		}
 	}
-
-	drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 }
 
 void
@@ -3251,6 +3255,117 @@ zoom(const Arg *arg)
 	pop(c);
 }
 
+int
+betterstatus_length(char *text)
+{
+	char *xname = text;
+	FoxString copy = FoxString_New(NULL);
+
+	for (int i = 0; xname[i] != '\0'; i++) {
+		if (xname[i] == '^') {
+
+            if (xname[i+1] == '#') {
+                i++;
+                for (int j = 0; j < 7; j++)
+                    i++;
+				i--;
+				if (xname[i+1] == ':') {
+					i++;
+					for (int j = 0; j < 7; j++)
+						i++;
+				}
+            }
+
+        } else {
+			FoxString_Add(&copy, xname[i]);
+        }
+	}
+
+	fprintf(stderr, "\n\n%s\n%d\n\n", copy.data, TEXTW(copy.data));
+	return TEXTW(copy.data);
+}
+
+char*
+betterstatus(char *text, int x)
+{
+	char *xname = text;
+
+	drw->scheme[ColFg] = scheme[SchemeNorm][ColFg];
+  	drw->scheme[ColBg] = scheme[SchemeNorm][ColBg];
+
+	FoxString temp_str = FoxString_New(NULL);
+	FoxString copy = FoxString_New(NULL);
+
+	FoxBox colors_box = FoxBox_New();
+	FoxBox foregrounds_box = FoxBox_New();
+	FoxBox words = FoxBox_New();
+
+	int offset = x;
+	int color_index = 0;
+	int enable = 0;
+
+	while (*xname != '\0') {
+		if (*xname == '^') {
+
+			if (FoxBox_Size(colors_box) > 0) {
+				drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
+				if (foregrounds_box[color_index-1] != NULL)
+					drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
+
+				if (enable)
+					offset = drw_text(drw, offset, 0, TEXTW(temp_str.data) - lrpad, bh, 0, temp_str.data, 0);
+			}
+					
+						
+			if (*(xname+1) == '#') {
+				FoxBox_Append(&colors_box, malloc(8));
+				FoxBox_Append(&foregrounds_box, NULL);
+				char *ptr = colors_box[color_index];
+                xname++;
+                for (int i = 0; i < 7; i++) {
+                    ptr[i] = *xname;
+                    xname++;
+                }
+				ptr[7] = '\0';
+
+				if (*xname == ':') {
+					xname++;
+					foregrounds_box[color_index] = malloc(8);
+					ptr = foregrounds_box[color_index];
+					for (int i = 0; i < 7; i++) {
+                    	ptr[i] = *xname;
+	                    xname++;
+                	}
+					ptr[7] = '\0';
+				}
+				
+				color_index++;
+			}
+
+			FoxBox_Append(&words, temp_str.data);
+			temp_str = FoxString_New(NULL);
+			enable = 1;
+		} else {
+			FoxString_Add(&copy, *xname);
+			FoxString_Add(&temp_str, *xname);
+            xname++;
+        }
+	}
+
+	if (enable) {
+		drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
+		if (foregrounds_box[color_index-1] != NULL)
+			drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
+	}
+
+	drw_text(drw, offset, 0, TEXTW(temp_str.data) - lrpad, bh, 0, temp_str.data, 0);
+
+	drw_clr_create(drw, &drw->scheme[ColFg], colors[SchemeNorm][ColFg], alphas[SchemeNorm][ColFg]);
+	drw_clr_create(drw, &drw->scheme[ColBg], colors[SchemeNorm][ColBg], alphas[SchemeNorm][ColBg]);
+
+	return copy.data;
+}
+
 #include "firewm-api.c"
 
 int
@@ -3338,9 +3453,9 @@ main(int argc, char *argv[])
 	}
 
 	if (argc == 2 && !strcmp("-v", argv[1]))
-		die("dwm-"VERSION);
+		die("firewm-"VERSION);
 	else if (argc != 1)
-		die("usage: dwm [-v]");
+		die("usage: firewm [-v]");
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))

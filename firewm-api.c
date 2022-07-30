@@ -34,6 +34,8 @@ firesetalpha(const Arg *arg)
 	updatestatus();
 	updatebarpos(selmon);
 	updatesystray(0);
+
+	
 }
 
 void

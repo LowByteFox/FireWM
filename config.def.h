@@ -5,6 +5,7 @@
 #define BARPADDING_PATCH
 
 #include <X11/XF86keysym.h>
+#include <X11/keysymdef.h>
 
 /* appearance */
 unsigned int borderpx  = 1;        /* border pixel of windows */
@@ -32,8 +33,8 @@ n - title
 s - status
 S - systray
 */
-char barlayout[7] = "ATsS";
-char center = 's';
+char barlayout[7] = "AnTsS";
+char center = 'T';
 
 char col_gray1[]         = "#222222";
 char col_defborder[]     = "#444444";
@@ -41,6 +42,8 @@ char foreground[]        = "#bbbbbb";
 char active_foreground[] = "#eeeeee";
 char col_activebar[]     = "#0055aa";
 char col_border[]        = "#0055aa";
+char barfg[]			 = "#FFFFFF";
+char barbg[]			 = "#000000";
 
 int tag_count = 5;
 
@@ -56,13 +59,13 @@ static const unsigned int borderalpha = 255;
 static const char *colors[][3]      = {
 	/*               fg                 bg              border   */
 	[SchemeNorm] = { foreground,        col_gray1,      col_defborder },
-	[SchemeSel]  = { active_foreground, col_activebar,  col_border    },
+	[SchemeSel]  = { active_foreground, col_activebar,  col_border    }
 };
 
 static unsigned int alphas[][3]      = {
 	/*               fg      bg        border     */
 	[SchemeNorm] = { OPAQUE, baralpha, borderalpha },
-	[SchemeSel]  = { OPAQUE, baralpha, borderalpha },
+	[SchemeSel]  = { OPAQUE, baralpha, borderalpha }
 };
 
 static const char *const autostart[] = {
