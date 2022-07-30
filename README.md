@@ -53,7 +53,7 @@ firewm-msg run_command firesetalpha {opacity}
 ## Known bugs
 It looks like icon patch doesn't like changing monitors; for example turning one off using xrandr <br>
 Make sure when setting status color that you also provide foreground; ^#FF3333:#000000Text ( and not like this ^#FF3333Text ) <br>
-Oder matters when setting bar layout
+Order matters when setting bar layout
 
 ## Changelog
 * Now you can set color to the status bar
