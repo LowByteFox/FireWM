@@ -49,7 +49,7 @@ firewm-msg run_command firesetalpha {opacity}
 ```
 
 ## Changelog
-* Removed few patches
-* Added bar layout
-* Renamed few variables
-* Added separated color for border
+* Now you can set color to the status bar
+* Fixed bugs
+* Created bugs
+
