@@ -23,7 +23,7 @@ int showsystray        = 1;   /* 0 means no systray */
 static const int scalepreview       = 4;        /* tag preview scaling */
 int corner_radius      = 0;   /* Radius of corners */
 
-static const char *fonts[]          = { "Sans Serif:style=Bold:size=12", "Font Awesome 5 Free:size=12", "Font Awesome 5 Brands:style=Solid:size=12", "Font Awesome 5 Free Solid:style=Solid:size=12" };
+static const char *fonts[]          = { "PowerlineSymbols:size=19", "Sans Serif:style=Bold:size=12" };
 static const char dmenufont[]       = "Sans Serif:size=12";
 
 /*
