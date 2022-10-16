@@ -38,6 +38,7 @@ exec firewm
 
 ## Known bugs
 Button for changing layouts doesn't work
+Xrandr causes crashes to FireWM
 
 ## Changelog
 Do I even know? 💀
