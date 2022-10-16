@@ -486,7 +486,7 @@ print_usage(const char *name)
   puts("                                  run_command and subscribe.");
   puts("");
 }
-
+/*r
 int
 main(int argc, char *argv[])
 {
@@ -546,3 +546,4 @@ main(int argc, char *argv[])
 
   return 0;
 }
+*/

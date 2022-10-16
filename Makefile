@@ -7,7 +7,7 @@ SRC = drw.c firewm.c util.c
 OBJ = ${SRC:.c=.o}
 USER? = "root"
 
-all: options firewm firewm-msg
+all: options firewm firewmctl
 
 options:
 	@echo firewm build options:
@@ -26,11 +26,14 @@ config.h:
 firewm: ${OBJ}
 	${CC} -o $@ ${OBJ} ${LDFLAGS}
 
-firewm-msg: firewm-msg.o
+firewmctl: firewmctl.o
 	${CC} -o $@ $< ${LDFLAGS}
 
+compositor:
+	gcc -o compositor composite.c -lX11 -lXext -lXdamage -lXfixes -lXtst -lXrender -lXcomposite -Llib -lFoxBox
+
 clean:
-	rm -f firewm firewm-msg ${OBJ} firewm-${VERSION}.tar.gz config.h
+	rm -f firewm firewmctl ${OBJ} firewm-${VERSION}.tar.gz config.h firewmctl.o
 
 dist: clean
 	mkdir -p firewm-${VERSION}
@@ -41,14 +44,10 @@ dist: clean
 	rm -rf firewm-${VERSION}
 
 install: all
-	@mkdir -p /home/${USER}/.config/firewm/
-	@chown ${USER}:${USER} /home/${USER}/.config/firewm/
-	@cp config.conf /home/${USER}/.config/firewm/
-	@chown ${USER}:${USER} /home/${USER}/.config/firewm/config.conf
 	mkdir -p ${DESTDIR}${PREFIX}/bin
-	cp -f firewm firewm-msg ${DESTDIR}${PREFIX}/bin
+	cp -f firewm firewmctl ${DESTDIR}${PREFIX}/bin
 	chmod 755 ${DESTDIR}${PREFIX}/bin/firewm
-	chmod 755 ${DESTDIR}${PREFIX}/bin/firewm-msg
+	chmod 755 ${DESTDIR}${PREFIX}/bin/firewmctl
 	mkdir -p ${DESTDIR}${MANPREFIX}/man1
 	
 
@@ -56,4 +55,8 @@ uninstall:
 	rm -f ${DESTDIR}${PREFIX}/bin/firewm\
 		${DESTDIR}${MANPREFIX}/man1/firewm.1
 
-.PHONY: all options clean dist install uninstall
+config:
+	@mkdir -p -v ${HOME}/.config/firewm/
+	@cp -i -v config.conf ${HOME}/.config/firewm/
+
+.PHONY: all options clean dist install uninstall config

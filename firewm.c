@@ -41,11 +41,12 @@
 #include <X11/Xlib.h>
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
-#include <pthread.h>
+#include <Imlib2.h>
 #include <ctype.h>
 #ifdef XINERAMA
 #include <X11/extensions/Xinerama.h>
 #endif /* XINERAMA */
+#include <X11/extensions/shape.h>
 #include <X11/Xft/Xft.h>
 #include <json-c/json.h>
 
@@ -66,6 +67,10 @@
 #define WIDTH(X)                ((X)->w + 2 * (X)->bw)
 #define HEIGHT(X)               ((X)->h + 2 * (X)->bw)
 #define TEXTW(X)                (drw_fontset_getwidth(drw, (X)) + lrpad)
+#define RESET_FG(Scheme)		(drw_clr_create(drw, &drw->scheme[ColFg], colors[Scheme][ColFg], alphas[Scheme][ColFg]))
+#define RESET_BG(Scheme)		(drw_clr_create(drw, &drw->scheme[ColBg], colors[Scheme][ColBg], alphas[Scheme][ColBg]))
+#define SET_BG(Scheme, color, alpha)   (drw_clr_create(drw, &drw->scheme[ColBg], color, alpha))
+#define SET_FG(Scheme, color, alpha)   (drw_clr_create(drw, &drw->scheme[ColFg], color, alpha))
 
 #define OPAQUE                  0xffU
 
@@ -89,12 +94,13 @@
 
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
-enum { SchemeNorm, SchemeSel, SchemeTemp }; /* color schemes */
+enum { SchemeNorm, SchemeSel }; /* color schemes */
 enum { NetSupported, NetSystemTray, NetSystemTrayOP, NetSystemTrayOrientation, NetSystemTrayVisual,
        NetWMName, NetWMIcon, NetWMState, NetWMCheck,
-       NetWMFullscreen, NetActiveWindow, NetWMWindowType, NetWMWindowTypeDock, NetSystemTrayOrientationHorz,
+       NetWMFullscreen, NetActiveWindow, NetWMWindowType, NetWMWindowTypeDesktop, NetWMWindowTypeDock, NetSystemTrayOrientationHorz,
        NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
 enum { Manager, Xembed, XembedInfo, XLast }; /* Xembed atoms */
+enum { DWMTags, DWMLast };
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkButton, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
@@ -181,6 +187,9 @@ struct Monitor {
 	Client *stack;
 	Monitor *next;
 	Window barwin;
+    Window tagwin;
+    int previewshow;
+    Pixmap tagmap[9];
 	const Layout *lt[2];
 	const Layout *lastlt;
 	int ltcur; /* current layout */
@@ -238,6 +247,7 @@ static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
 static unsigned int getsystraywidth();
 static void grabbuttons(Client *c, int focused);
 static void grabkeys(void);
+static int ispanel(Client *c);
 static int handlexevent(struct epoll_event *ev);
 static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
@@ -273,7 +283,6 @@ static void setup(void);
 static void setupepoll(void);
 static void seturgent(Client *c, int urg);
 static void showhide(Client *c);
-static void sigchld(int unused);
 static void sighup(int unused);
 static void sigterm(int unused);
 static void spawn(const Arg *arg);
@@ -313,24 +322,25 @@ static int xerror(Display *dpy, XErrorEvent *ee);
 static int xerrordummy(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void xinitvisual();
+static void drawroundedcorners(Client *c);
 static void zoom(const Arg *arg);
+static void settagsatom(Window w, unsigned int tags);
 
 // FireWM custom functions
 
-int checkColor(char* color);
-int betterstatus_length(char *text);
-char* betterstatus(char *text, int x);
+static int checkColor(char* color);
+static int betterstatus_length(char *text);
+static char* betterstatus(char *text, int x);
 
 // FireWM related API
 
 static void firesetalpha(const Arg *arg);
 static void firesetgaps(const Arg *arg);
-static void firesetcyan(const Arg *arg);
+static void firesetbarcolor(const Arg *arg);
 static void firesetbordercolor(const Arg *arg);
 static void firesetbarlayout(const Arg *arg);
 static void firesetbarcenter(const Arg *arg);
-
-static void autostart_exec(void);
+static void firesetbarpadding(const Arg *arg);
 
 /* variables */
 static const char broken[] = "broken";
@@ -339,8 +349,8 @@ static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
 static int bh, blw = 0;      /* bar geometry */
 static int lrpad;            /* sum of left and right padding for text */
-static int vp;               /* vertical padding for bar */
-static int sp;               /* side padding for bar */
+static int vp;
+static int sp;
 static int (*xerrorxlib)(Display *, XErrorEvent *);
 static unsigned int numlockmask = 0;
 static void (*handler[LASTEvent]) (XEvent *) = {
@@ -360,7 +370,7 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[ResizeRequest] = resizerequest,
 	[UnmapNotify] = unmapnotify
 };
-static Atom wmatom[WMLast], netatom[NetLast], xatom[XLast];
+static Atom wmatom[WMLast], netatom[NetLast], xatom[XLast], dwmatom[DWMLast];
 static int epoll_fd;
 static int dpy_fd;
 static int restart = 0;
@@ -385,6 +395,7 @@ static int useargb = 0;
 static Visual *visual;
 static int depth;
 static Colormap cmap;
+static int current_tag = 0;
 
 #include "ipc.h"
 
@@ -408,34 +419,6 @@ struct Pertag {
 
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
-
-/* dwm will keep pid's of processes from autostart array and kill them at quit */
-static pid_t *autostart_pids;
-static size_t autostart_len;
-
-/* execute command from autostart array */
-static void
-autostart_exec() {
-	const char *const *p;
-	size_t i = 0;
-
-	/* count entries */
-	for (p = autostart; *p; autostart_len++, p++)
-		while (*++p);
-
-	autostart_pids = malloc(autostart_len * sizeof(pid_t));
-	for (p = autostart; *p; i++, p++) {
-		if ((autostart_pids[i] = fork()) == 0) {
-			setsid();
-			execvp(*p, (char *const *)p);
-			fprintf(stderr, "firewm: execvp %s\n", *p);
-			perror(" failed");
-			_exit(EXIT_FAILURE);
-		}
-		/* skip arguments */
-		while (*++p);
-	}
-}
 
 /* function implementations */
 void
@@ -557,6 +540,8 @@ arrange(Monitor *m)
 		restack(m);
 	} else for (m = mons; m; m = m->next)
 		arrangemon(m);
+
+	for (Client *c = m->clients; c; c = c->next) drawroundedcorners(c);
 }
 
 void
@@ -565,6 +550,8 @@ arrangemon(Monitor *m)
 	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, sizeof m->ltsymbol);
 	if (m->lt[m->sellt]->arrange)
 		m->lt[m->sellt]->arrange(m);
+	
+	for (Client *c = m->clients; c; c = c->next) drawroundedcorners(c);
 }
 
 void
@@ -598,6 +585,10 @@ buttonpress(XEvent *e)
 		focus(NULL);
 	}
 	if (ev->window == selmon->barwin) {
+        if (selmon->previewshow) {
+			selmon->previewshow = 0;
+            XUnmapWindow(dpy, selmon->tagwin);
+		}
 		i = x = 0;
 		x += TEXTW(buttonbar) + clkbuttonpos;
 		if(ev->x > clkbuttonpos && ev->x < x) {
@@ -689,6 +680,7 @@ void
 cleanupmon(Monitor *mon)
 {
 	Monitor *m;
+    size_t i;
 
 	if (mon == mons)
 		mons = mons->next;
@@ -799,7 +791,7 @@ configurenotify(XEvent *e)
 				for (c = m->clients; c; c = c->next)
 					if (c->isfullscreen)
 						resizeclient(c, m->mx, m->my, m->mw, m->mh);
-				XMoveResizeWindow(dpy, m->barwin, m->wx + sp, m->by + vp, m->ww -  2 * sp, bh);
+				XMoveResizeWindow(dpy, m->barwin, m->wx + barpadding, m->by + (topbar == 1) ? barpadding : -barpadding, m->ww -  2 * barpadding, bh);
 			}
 			focus(NULL);
 			arrange(NULL);
@@ -987,7 +979,7 @@ drawbar(Monitor *m)
 		return;
 
 	if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
-		strcpy(stext, "firewm-"VERSION);
+		strcpy(stext, "firewm-6.3");
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	drw_text(drw, 0, 0, selmon->ww, bh, 0, "", 0);
@@ -1014,6 +1006,8 @@ drawbar(Monitor *m)
 		clkbuttonpos = m->mw;
 	}
 
+	for (c = m->clients; c; c = c->next) drawroundedcorners(c);
+
 	int mid;
 
 	for (int barlayoutI = 0; barlayoutI < strlen(barlayout); barlayoutI++) {
@@ -1023,16 +1017,19 @@ drawbar(Monitor *m)
 				w = TEXTW(buttonbar);
 
 				drw_setscheme(drw, scheme[SchemeNorm]);
-
-				mid = (selmon->ww - TEXTW(buttonbar)) / 2;
+				if(checkColor(bar_btnfg))
+					SET_FG(SchemeNorm, bar_btnfg, 255);
 
 				clkbuttonpos = x;
 				x = drw_text(drw, x, 0, w, bh, lrpad / 2, buttonbar, 0);
+				RESET_FG(SchemeNorm);
 				break;
 				
 			case 'T':
 
 				for (c = m->clients; c; c = c->next) {
+ 					if (ispanel(c)) continue;
+
 					occ |= c->tags;
 					if (c->isurgent)
 						urg |= c->tags;
@@ -1045,19 +1042,27 @@ drawbar(Monitor *m)
 				}
 
 				mid = (selmon->ww - tmp_width) / 2;
-				clktagpos = x;
 
 				if (center == 'T') {
 					clktagpos = mid;
 					for (i = 0; i < tag_count; i++) {
 						w = TEXTW(tags[i]);
 						drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
+
+						if (checkColor(m->tagset[m->seltags] & 1 << i ? active_tagfgs[i] : tagfgs[i]))
+							drw_clr_create(drw, &drw->scheme[ColFg], m->tagset[m->seltags] & 1 << i ? active_tagfgs[i] : tagfgs[i], alphas[SchemeNorm][ColFg]);
+
 						drw_text(drw, mid, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
-						if (occ & 1 << i)
+
+						if (occ & 1 << i) 
 							drw_rect(drw, mid + boxw, bh-3, w - ( 2 * boxw ), boxw, 1, 0);
+						
+						RESET_FG(SchemeNorm);
 						mid += w;
 					}
+
 				} else {
+					clktagpos = x;
 					for (i = 0; i < tag_count; i++) {
 						w = TEXTW(tags[i]);
 						drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
@@ -1086,22 +1091,29 @@ drawbar(Monitor *m)
 
 				tw = TEXTW(m->sel->name);
 
+				if (checkColor(titlefg))
+					SET_FG(SchemeNorm, titlefg, 255);
+
 				if ((w = m->ww - tw - stw - x) > bh) {
 					if (m->sel) {
+						if (ispanel(m->sel)) continue;
 						// drw_setscheme(drw, scheme[m == selmon ? SchemeSel : SchemeNorm]);
 						drw_setscheme(drw, scheme[SchemeNorm]);
 						mid = (selmon->ww - TEXTW(m->sel->name)) / 2;
 						tmp_x = 0;
+
 						if (center == 'n')
-							drw_text(drw, mid, 0, w - 2 * sp, bh, lrpad / 2 + (m->sel->icon ? m->sel->icw + ICONSPACING : 0), m->sel->name, 0);
+							drw_text(drw, mid, 0, w - 2 * sp, bh, lrpad / 2 + (m->sel->icon && showicon ? m->sel->icw + ICONSPACING : 0), m->sel->name, 0);
 						else
-							tmp_x = drw_text(drw, x, 0, w - 2 * sp, bh, lrpad / 2 + (m->sel->icon ? m->sel->icw + ICONSPACING : 0), m->sel->name, 0);
-						if (m->sel->icon) drw_pic(drw, x + lrpad / 2, (bh - m->sel->ich) / 2, m->sel->icw, m->sel->ich, m->sel->icon);
-							if (m->sel->isfloating) {
-								drw_rect(drw, x + boxs, boxs, boxw, boxw, m->sel->isfixed, 0);
-								if (m->sel->isalwaysontop)
-									drw_rect(drw, x + boxs, bh - boxw, boxw, boxw, 0, 0);
-							}
+							tmp_x = drw_text(drw, x, 0, w - 2 * sp, bh, lrpad / 2 + (m->sel->icon && showicon ? m->sel->icw + ICONSPACING : 0), m->sel->name, 0);
+
+						if (m->sel->icon && showicon) drw_pic(drw, x + lrpad / 2, (bh - m->sel->ich) / 2, m->sel->icw, m->sel->ich, m->sel->icon);
+
+						if (m->sel->isfloating) {
+							drw_rect(drw, x + boxs, boxs, boxw, boxw, m->sel->isfixed, 0);
+							if (m->sel->isalwaysontop)
+								drw_rect(drw, x + boxs, bh - boxw, boxw, boxw, 0, 0);
+						}
 
 						x += tmp_x;
 					} else {
@@ -1109,6 +1121,8 @@ drawbar(Monitor *m)
 						drw_rect(drw, x, 0, w - 2 * sp, bh, 1, 1);
 					}
 				}
+
+				RESET_FG(SchemeNorm);
 				break;
 
 			case 's':
@@ -1120,10 +1134,8 @@ drawbar(Monitor *m)
 					mid = (selmon->ww - tw) / 2;
 					if (center == 's') {
 						betterstatus(stext, mid);
-						// drw_text(drw, mid, 0, tw, bh, 0, text, 0);
 					} else {
-						char *text = betterstatus(stext, m->ww - ( 2 * sp ) - tw - stw);
-						// x = //drw_text(drw, m->ww - (2 * sp) - tw - stw, 0, tw, bh, 0, text, 0);
+						char *text = betterstatus(stext, m->ww - ( 2 * sp ) - tw - getsystraywidth());
 						x = TEXTW(text);
 					}
 				}
@@ -1134,14 +1146,18 @@ drawbar(Monitor *m)
 				if (showsystray && m == systraytomon(m)) {
 					// drw_setscheme(drw, scheme[selmon->sel == NULL ? SchemeNorm : SchemeSel]);
 					drw_setscheme(drw, scheme[SchemeNorm]);
+					if(checkColor(systraybg))
+						SET_BG(SchemeNorm, systraybg, 255);
+
 					if (center == 'S');
 						// TODO: Create notification that systray cannot be in center
 					drw_rect(drw, m->ww - stw, 0, stw, bh, 1, 1);
+					RESET_BG(SchemeNorm);
 				}
-				drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 				break;
 		}
 	}
+	drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 }
 
 void
@@ -1201,11 +1217,14 @@ focus(Client *c)
 			selmon = c->mon;
 		if (c->isurgent)
 			seturgent(c, 0);
-		detachstack(c);
-		attachstack(c);
-		grabbuttons(c, 1);
-		XSetWindowBorder(dpy, c->win, scheme[SchemeSel][ColBorder].pixel);
-		setfocus(c);
+
+		if (!ispanel(c)) {
+            detachstack(c);
+            attachstack(c);
+        	grabbuttons(c, 1);
+			XSetWindowBorder(dpy, c->win, scheme[SchemeSel][ColBorder].pixel);
+        	setfocus(c);
+		}
 	} else {
 		XSetInputFocus(dpy, root, RevertToPointerRoot, CurrentTime);
 		XDeleteProperty(dpy, root, netatom[NetActiveWindow]);
@@ -1238,6 +1257,7 @@ focusmon(const Arg *arg)
 	focus(NULL);
 }
 
+int focussed_panel = 0;
 void
 focusstack(const Arg *arg)
 {
@@ -1261,6 +1281,12 @@ focusstack(const Arg *arg)
 	if (c) {
 		focus(c);
 		restack(selmon);
+	}
+	// skipping the panel when switching focus:
+  	if (ispanel(c) && focussed_panel == 0) {
+    	focussed_panel = 1;
+    	focusstack(arg);
+    	focussed_panel = 0;
 	}
 }
 
@@ -1470,6 +1496,11 @@ handlexevent(struct epoll_event *ev)
 	return 0;
 }
 
+int
+ispanel(Client *c) {
+    return !strcmp(c->name, "Plank") || !strcmp(c->name, "plank");
+}
+
 void
 incnmaster(const Arg *arg)
 {
@@ -1527,9 +1558,22 @@ manage(Window w, XWindowAttributes *wa)
 	Client *c, *t = NULL;
 	Window trans = None;
 	XWindowChanges wc;
+	int format;
+	unsigned int *ptags;
+	unsigned long n, extra;
+	Atom atom;
+ 
 
 	c = ecalloc(1, sizeof(Client));
 	c->win = w;
+
+	if (getatomprop(c, netatom[NetWMWindowType]) == netatom[NetWMWindowTypeDesktop]) {
+		XMapWindow(dpy, c->win);
+		XLowerWindow(dpy, c->win);
+		free(c);
+		return;
+	}
+
 	/* geometry */
 	c->x = c->oldx = wa->x;
 	c->y = c->oldy = wa->y;
@@ -1545,7 +1589,13 @@ manage(Window w, XWindowAttributes *wa)
 	} else {
 		c->mon = selmon;
 		applyrules(c);
+		if(XGetWindowProperty(dpy, c->win, dwmatom[DWMTags], 0L, 1L, False, XA_CARDINAL,
+			&atom, &format, &n, &extra, (unsigned char **)&ptags) == Success && n == 1 && *ptags != 0) {
+				c->tags = *ptags;
+				XFree(ptags);
+		}
 	}
+	settagsatom(c->win, c->tags);
 
 	if (c->x + WIDTH(c) > c->mon->mx + c->mon->mw)
 		c->x = c->mon->mx + c->mon->mw - WIDTH(c);
@@ -1555,9 +1605,18 @@ manage(Window w, XWindowAttributes *wa)
 	/* only fix client y-offset, if the client center might cover the bar */
 	c->y = MAX(c->y, ((c->mon->by == c->mon->my) && (c->x + (c->w / 2) >= c->mon->wx)
 		&& (c->x + (c->w / 2) < c->mon->wx + c->mon->ww)) ? bh : c->mon->my);
-	c->bw = borderpx;
 
+	if (corner_radius > 0) 
+		c->bw = 0;
+	else 
+		c->bw = borderpx;
+	
+	if (ispanel(c)) {
+		c->bw = c->oldbw = 0;
+	}
+	
 	wc.border_width = c->bw;
+
 	XConfigureWindow(dpy, w, CWBorderWidth, &wc);
 	XSetWindowBorder(dpy, w, scheme[SchemeNorm][ColBorder].pixel);
 	configure(c); /* propagates border_width, if size doesn't change */
@@ -1580,8 +1639,61 @@ manage(Window w, XWindowAttributes *wa)
 		unfocus(selmon->sel, 0);
 	c->mon->sel = c;
 	arrange(c->mon);
+	
+	drawroundedcorners(c);
+
 	XMapWindow(dpy, c->win);
 	focus(NULL);
+}
+
+void
+drawroundedcorners(Client *c) {
+    // if set to zero in config.h, do not attempt to round
+    if(corner_radius < 0) return;
+
+    // NOTE: this is extremely hacky and surely could be optimized.
+    //       Any X wizards out there reading this, please pull request.
+    if (corner_radius > 0 && c && !c->isfullscreen) {
+        Window win;
+        win = c->win;
+        if(!win) return;
+
+        XWindowAttributes win_attr;
+        if(!XGetWindowAttributes(dpy, win, &win_attr)) return;
+
+        // set in config.h:
+        int dia = 2 * corner_radius;
+        int w = c->w;
+        int h = c->h;
+        if(w < dia || h < dia) return;
+
+        Pixmap mask;
+        mask = XCreatePixmap(dpy, win, w, h, 1);
+        if(!mask) return;
+
+        XGCValues xgcv;
+        GC shape_gc;
+        shape_gc = XCreateGC(dpy, mask, 0, &xgcv);
+
+        if(!shape_gc) {
+            XFreePixmap(dpy, mask);
+            free(shape_gc);
+            return;
+        }
+
+        XSetForeground(dpy, shape_gc, 0);
+        XFillRectangle(dpy, mask, shape_gc, 0, 0, w, h);
+        XSetForeground(dpy, shape_gc, 1);
+        XFillArc(dpy, mask, shape_gc, 0, 0, dia, dia, 0, 23040);
+        XFillArc(dpy, mask, shape_gc, w-dia-1, 0, dia, dia, 0, 23040);
+        XFillArc(dpy, mask, shape_gc, 0, h-dia-1, dia, dia, 0, 23040);
+        XFillArc(dpy, mask, shape_gc, w-dia-1, h-dia-1, dia, dia, 0, 23040);
+        XFillRectangle(dpy, mask, shape_gc, corner_radius, 0, w-dia, h);
+        XFillRectangle(dpy, mask, shape_gc, 0, corner_radius, w, h-dia);
+        XShapeCombineMask(dpy, win, ShapeBounding, 0, 0, mask, ShapeSet);
+        XFreePixmap(dpy, mask);
+        XFreeGC(dpy, shape_gc);
+    }
 }
 
 void
@@ -1635,6 +1747,7 @@ motionnotify(XEvent *e)
 	static Monitor *mon = NULL;
 	Monitor *m;
 	XMotionEvent *ev = &e->xmotion;
+    unsigned int i, x;
 
 	if (ev->window != root)
 		return;
@@ -1695,6 +1808,7 @@ movemouse(const Arg *arg)
 				togglefloating(NULL);
 			if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
 				resize(c, nx, ny, c->w, c->h, 1);
+
 			break;
 		}
 	} while (ev.type != ButtonRelease);
@@ -1790,15 +1904,7 @@ quit(const Arg *arg)
 	if ((fd = fopen(lockfile, "r")) != NULL) {
 		fclose(fd);
 		remove(lockfile);
-		size_t i;
 
-		/* kill child processes */
-		for (i = 0; i < autostart_len; i++) {
-			if (0 < autostart_pids[i]) {
-				kill(autostart_pids[i], SIGTERM);
-				waitpid(autostart_pids[i], NULL, 0);
-			}
-		}
 		if(arg->i) restart = 1;
 		running = 0;
 	} else {
@@ -1837,8 +1943,9 @@ removesystrayicon(Client *i)
 void
 resize(Client *c, int x, int y, int w, int h, int interact)
 {
-	if (applysizehints(c, &x, &y, &w, &h, interact))
+	if (ispanel(c) || applysizehints(c, &x, &y, &w, &h, interact)) {
 		resizeclient(c, x, y, w, h);
+	}
 }
 
 void
@@ -1930,6 +2037,9 @@ resizemouse(const Arg *arg)
 			}
 			if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
 				resize(c, nx, ny, nw, nh, 1);
+			
+			drawroundedcorners(c);
+
 			break;
 		}
 	} while (ev.type != ButtonRelease);
@@ -1943,6 +2053,7 @@ resizemouse(const Arg *arg)
 		selmon = m;
 		focus(NULL);
 	}
+	drawroundedcorners(c);
 }
 
 void
@@ -2003,6 +2114,8 @@ run(void)
 	XSync(dpy, False);
 
 	/* main event loop */
+    Arg temp = {.ui = current_tag};
+    view(&temp);
 	while (running) {
 		event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
@@ -2206,9 +2319,6 @@ setup(void)
 	XSetWindowAttributes wa;
 	Atom utf8string;
 
-	/* clean up any zombies immediately */
-	sigchld(0);
-
 	signal(SIGHUP, sighup);
 	signal(SIGTERM, sigterm);
 
@@ -2223,9 +2333,9 @@ setup(void)
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
 	bh = user_bh ? user_bh : drw->fonts->h + 2;
+	sp = barpadding;
+	vp = (topbar == 1) ? barpadding : - barpadding;
 	updategeom();
-	sp = sidepad;
-	vp = (topbar == 1) ? vertpad : - vertpad;
 
 	/* init atoms */
 	utf8string = XInternAtom(dpy, "UTF8_STRING", False);
@@ -2248,10 +2358,12 @@ setup(void)
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDock] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
+	netatom[NetWMWindowTypeDesktop] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DESKTOP", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
 	xatom[Manager] = XInternAtom(dpy, "MANAGER", False);
 	xatom[Xembed] = XInternAtom(dpy, "_XEMBED", False);
 	xatom[XembedInfo] = XInternAtom(dpy, "_XEMBED_INFO", False);
+	dwmatom[DWMTags] = XInternAtom(dpy, "_DWM_TAGS", False);
 	/* init cursors */
 	cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
 	cursor[CurResize] = drw_cur_create(drw, XC_top_left_corner);
@@ -2361,30 +2473,6 @@ showhide(Client *c)
 }
 
 void
-sigchld(int unused)
-{
-	pid_t pid;
-
-	if (signal(SIGCHLD, sigchld) == SIG_ERR)
-		die("can't install SIGCHLD handler:");
-	while (0 < (pid = waitpid(-1, NULL, WNOHANG))) {
-		pid_t *p, *lim;
-
-		if (!(p = autostart_pids))
-			continue;
-		lim = &p[autostart_len];
-
-		for (; p < lim; p++) {
-			if (*p == pid) {
-				*p = -1;
-				break;
-			}
-		}
-
-	}
-}
-
-void
 sighup(int unused)
 {
 	Arg a = {.i = 1};
@@ -2438,8 +2526,12 @@ tag(const Arg *arg)
 		if (arg->ui > (1 << (tag_count-1)))
 			return;
 	}
+
+    current_tag = arg->ui;
+
 	if (selmon->sel && arg->ui & TAGMASK) {
 		selmon->sel->tags = arg->ui & TAGMASK;
+		settagsatom(selmon->sel->win, selmon->sel->tags);
 		focus(NULL);
 		arrange(selmon);
 	}
@@ -2457,29 +2549,32 @@ tagmon(const Arg *arg)
 void
 tile(Monitor *m)
 {
-	unsigned int i, n, h, mw, my, ty;
+	unsigned int i, n, cx, cy, cw, ch, aw, ah, cols, rows;
 	Client *c;
 
-	for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
-	if (n == 0)
-		return;
+	for(n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next))
+		n++;
 
-	if (n > m->nmaster)
-		mw = m->nmaster ? m->ww * m->mfact : 0;
-	else
-		mw = m->ww - m->gappx;
-	for (i = 0, my = ty = m->gappx, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
-		if (i < m->nmaster) {
-			h = (m->wh - my) / (MIN(n, m->nmaster) - i) - m->gappx;
-			resize(c, m->wx + m->gappx, m->wy + my, mw - (2*c->bw) - m->gappx, h - (2*c->bw), 0);
-			if (my + HEIGHT(c) < m->wh)
-				my += HEIGHT(c) + gappx;
-		} else {
-			h = (m->wh - ty) / (n - i) - m->gappx;
-			resize(c, m->wx + mw + m->gappx, m->wy + ty, m->ww - mw - (2*c->bw) - 2*m->gappx, h - (2*c->bw), 0);
-			if (ty + HEIGHT(c) < m->wh)
-				ty += HEIGHT(c) + gappx;
-		}
+	/* grid dimensions */
+	for(rows = 0; rows <= n/2; rows++)
+		if(rows*rows >= n)
+			break;
+	cols = (rows && (rows - 1) * rows >= n) ? rows - 1 : rows;
+
+	/* window geoms (cell height/width) */
+	ch = m->wh / (rows ? rows : 1);
+	cw = m->ww / (cols ? cols : 1);
+	for(i = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next)) {
+		cx = m->wx + (i / rows) * cw + m->gappx / 2;
+		cy = m->wy + (i % rows) * ch + m->gappx / 2;
+		/* adjust height/width of last row/column's windows */
+		ah = ((i + 1) % rows == 0) ? m->wh - ch * rows : 0;
+        ah -= m->gappx;
+		aw = (i >= rows * (cols - 1)) ? m->ww - cw * cols : 0;
+        aw -= m->gappx;
+		resize(c, cx, cy, cw - 2 * c->bw + aw, ch - 2 * c->bw + ah, 0);
+		i++;
+	}
 }
 
 void
@@ -2560,12 +2655,22 @@ toggletag(const Arg *arg)
 
 	if (!selmon->sel)
 		return;
+
+    current_tag = arg->ui;
+
 	newtags = selmon->sel->tags ^ (arg->ui & TAGMASK);
 	if (newtags) {
 		selmon->sel->tags = newtags;
+		settagsatom(selmon->sel->win, selmon->sel->tags);
 		focus(NULL);
 		arrange(selmon);
 	}
+}
+
+void
+settagsatom(Window w, unsigned int tags) {
+	XChangeProperty(dpy, w, dwmatom[DWMTags], XA_CARDINAL, 32,
+	                PropModeReplace, (unsigned char*)&tags, 1);
 }
 
 void
@@ -2578,6 +2683,8 @@ toggleview(const Arg *arg)
 		if (arg->ui > (1 << (tag_count-1)))
 			return;
 	}
+
+    current_tag = arg->ui;
 
 	if (newtagset) {
 		selmon->tagset[selmon->seltags] = newtagset;
@@ -2687,6 +2794,8 @@ updatebars(void)
 		.colormap = cmap,
 		.event_mask = ButtonPressMask|ExposureMask
 	};
+
+    wa.event_mask |= PointerMotionMask;
 	XClassHint ch = {"firewm", "firewm"};
 	for (m = mons; m; m = m->next) {
 		if (m->barwin)
@@ -2708,9 +2817,9 @@ updatebarpos(Monitor *m)
 	m->wy = m->my;
 	m->wh = m->mh;
 	if (m->showbar) {
-		m->wh = m->wh - vertpad - bh;
-		m->by = m->topbar ? m->wy : m->wy + m->wh + vertpad;
-		m->wy = m->topbar ? m->wy + bh + vp : m->wy;
+ 		m->wh = m->wh - barpadding - bh;
+ 		m->by = m->topbar ? m->wy : m->wy + m->wh + barpadding;
+ 		m->wy = m->topbar ? m->wy + bh + vp : m->wy;
 	} else
 		m->by = -bh - vp;
 }
@@ -2723,10 +2832,11 @@ updateclientlist()
 
 	XDeleteProperty(dpy, root, netatom[NetClientList]);
 	for (m = mons; m; m = m->next)
-		for (c = m->clients; c; c = c->next)
+		for (c = m->clients; c; c = c->next) {
 			XChangeProperty(dpy, root, netatom[NetClientList],
 				XA_WINDOW, 32, PropModeAppend,
 				(unsigned char *) &(c->win), 1);
+		}
 }
 
 int
@@ -2871,7 +2981,7 @@ void
 updatestatus(void)
 {
 	if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
-		strcpy(stext, "firewm-"VERSION);
+		strcpy(stext, "firewm-6.3");
 	drawbar(selmon);
 }
 
@@ -2883,12 +2993,8 @@ updatesystray(int updatebar)
 	Client *i;
 	Monitor *m = systraytomon(NULL);
 	unsigned int x = m->mx + m->mw;
-	unsigned int w = 1, xpad = 0, ypad = 0;
+	unsigned int w = 1, xpad = barpadding, ypad = (topbar == 1) ? barpadding : -barpadding;
 	bh = user_bh ? user_bh : drw->fonts->h + 2;
-	#ifdef BARPADDING_PATCH
-	xpad = sp;
-	ypad = vp;
-	#endif // BARPADDING_PATCH
 
 	if (!showsystray)
 		return;
@@ -2940,9 +3046,6 @@ updatesystray(int updatebar)
 	w = w ? w + systrayspacing : 1;
 	x -= w;
 	XMoveResizeWindow(dpy, systray->win, x - xpad, m->by + ypad, w, bh);
-	// drw_setscheme(drw, scheme[selmon->sel == NULL ? SchemeNorm : SchemeSel]);
-	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_rect(drw, x - xpad * 2, m->by, w, bh, 1, 1);
 	wc.x = x - xpad;
 	wc.y = m->by + ypad;
 	wc.width = w;
@@ -3071,13 +3174,16 @@ view(const Arg *arg)
 	int i;
 	unsigned int tmptag;
 
+	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
+		return;
+
 	if (arg->ui != ~0) {
 		if (arg->ui > (1 << (tag_count-1)))
 			return;
-	}
+    }
 
-	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
-		return;
+    current_tag = arg->ui;
+
 	selmon->seltags ^= 1; /* toggle sel tagset */
 	if (arg->ui & TAGMASK) {
 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
@@ -3105,6 +3211,8 @@ view(const Arg *arg)
 		togglebar(NULL);
 
 	focus(NULL);
+
+	
 	arrange(selmon);
 }
 
@@ -3263,11 +3371,10 @@ betterstatus_length(char *text)
 
 	for (int i = 0; xname[i] != '\0'; i++) {
 		if (xname[i] == '^') {
-
             if (xname[i+1] == '#') {
                 i++;
                 for (int j = 0; j < 7; j++)
-                    i++;
+					i++;
 				i--;
 				if (xname[i+1] == ':') {
 					i++;
@@ -3280,9 +3387,9 @@ betterstatus_length(char *text)
 			FoxString_Add(&copy, xname[i]);
         }
 	}
-
-	fprintf(stderr, "\n\n%s\n%d\n\n", copy.data, TEXTW(copy.data));
-	return TEXTW(copy.data);
+	int length = TEXTW(copy.data);
+	FoxString_Clean(&copy);
+	return length;
 }
 
 char*
@@ -3307,16 +3414,16 @@ betterstatus(char *text, int x)
 	while (*xname != '\0') {
 		if (*xname == '^') {
 
-			if (FoxBox_Size(colors_box) > 0) {
-				drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
+			if (color_index > 0) {
+				if (checkColor(colors_box[color_index-1]))
+					drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
 				if (foregrounds_box[color_index-1] != NULL)
-					drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
+					if (checkColor(foregrounds_box[color_index-1]))
+						drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
 
 				if (enable)
 					offset = drw_text(drw, offset, 0, TEXTW(temp_str.data) - lrpad, bh, 0, temp_str.data, 0);
 			}
-					
-						
 			if (*(xname+1) == '#') {
 				FoxBox_Append(&colors_box, malloc(8));
 				FoxBox_Append(&foregrounds_box, NULL);
@@ -3337,6 +3444,8 @@ betterstatus(char *text, int x)
 	                    xname++;
                 	}
 					ptr[7] = '\0';
+				} else {
+					xname--;
 				}
 				
 				color_index++;
@@ -3351,14 +3460,16 @@ betterstatus(char *text, int x)
             xname++;
         }
 	}
-
+	temp_str.data[strlen(temp_str.data)] = '\0';
 	if (enable) {
-		drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
+		if (checkColor(colors_box[color_index-1]))
+			drw_clr_create(drw, &drw->scheme[ColBg], colors_box[color_index-1], 255);
 		if (foregrounds_box[color_index-1] != NULL)
-			drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
+			if (checkColor(foregrounds_box[color_index-1]))
+				drw_clr_create(drw, &drw->scheme[ColFg], foregrounds_box[color_index-1], 255);
 	}
 
-	drw_text(drw, offset, 0, TEXTW(temp_str.data) - lrpad, bh, 0, temp_str.data, 0);
+	drw_text(drw, offset, 0, TEXTW(temp_str.data), bh, 0, temp_str.data, 0);
 
 	drw_clr_create(drw, &drw->scheme[ColFg], colors[SchemeNorm][ColFg], alphas[SchemeNorm][ColFg]);
 	drw_clr_create(drw, &drw->scheme[ColBg], colors[SchemeNorm][ColBg], alphas[SchemeNorm][ColBg]);
@@ -3388,30 +3499,57 @@ main(int argc, char *argv[])
 
 		JSONroot = json_tokener_parse(data.data);
 
-		json_object *borderpxJSON = json_object_object_get(JSONroot, "borderpx");
+		json_object *borderpxJSON = json_object_object_get(JSONroot, "border_width");
 		json_object *gapJSON = json_object_object_get(JSONroot, "gap");
 		json_object *snapJSON = json_object_object_get(JSONroot, "snap");
-		json_object *showbarJSON = json_object_object_get(JSONroot, "showbar");
-		json_object *topbarJSON = json_object_object_get(JSONroot, "topbar");
-		json_object *buttonbarJSON = json_object_object_get(JSONroot, "buttonbar");
-		json_object *barheightJSON = json_object_object_get(JSONroot, "barheight");
-		json_object *systrayspacingJSON = json_object_object_get(JSONroot, "systrayspacing");
-		json_object *showsystrayJSON = json_object_object_get(JSONroot, "showsystray");
-		json_object *col_gray1JSON = json_object_object_get(JSONroot, "col_gray1");
+		json_object *showbarJSON = json_object_object_get(JSONroot, "show_bar");
+		json_object *topbarJSON = json_object_object_get(JSONroot, "top_bar");
+		json_object *buttonbarJSON = json_object_object_get(JSONroot, "bar_button");
+		json_object *barheightJSON = json_object_object_get(JSONroot, "bar_height");
+		json_object *systrayspacingJSON = json_object_object_get(JSONroot, "systray_spacing");
+		json_object *showsystrayJSON = json_object_object_get(JSONroot, "show_systray");
+		json_object *bar_backgroundJSON = json_object_object_get(JSONroot, "bar_background");
 		json_object *col_defborderJSON = json_object_object_get(JSONroot, "default_border_color");
 		json_object *foregroundJSON = json_object_object_get(JSONroot, "foreground");
 		json_object *active_foregroundJSON = json_object_object_get(JSONroot, "active_foreground");
 		json_object *col_activebarJSON = json_object_object_get(JSONroot, "bar_color");
 		json_object *col_borderJSON = json_object_object_get(JSONroot, "border_color");
-		json_object *baralphaJSON = json_object_object_get(JSONroot, "baralpha");
+		json_object *baralphaJSON = json_object_object_get(JSONroot, "bar_alpha");
 		json_object *tagsJSON = json_object_object_get(JSONroot, "tags");
+		json_object *tag_fgsJSON = json_object_object_get(JSONroot, "tag_fgs");
+		json_object *active_tag_fgsJSON = json_object_object_get(JSONroot, "active_tag_fgs");
+		json_object *bar_layoutJSON = json_object_object_get(JSONroot, "bar_layout");
+		json_object *bar_centerJSON = json_object_object_get(JSONroot, "bar_center");
+		json_object *show_iconJSON = json_object_object_get(JSONroot, "show_icon");
+		json_object *mod_keyJSON = json_object_object_get(JSONroot, "mod_key");
+		json_object *term_emulatorJSON = json_object_object_get(JSONroot, "term_emulator");
+		json_object *systray_bgJSON = json_object_object_get(JSONroot, "systray_bg");
+		json_object *bar_button_fgJSON = json_object_object_get(JSONroot, "bar_button_fg");
+		json_object *title_fgJSON = json_object_object_get(JSONroot, "title_fg");
+
 		int tagsL = json_object_array_length(tagsJSON);
+		int tagfgsL = json_object_array_length(tag_fgsJSON);
+		int acitve_tagfgsL = json_object_array_length(active_tag_fgsJSON);
+
 		if (tagsL > 9) tagsL = 9;
+		if (tagfgsL > 9) tagfgsL = 9;
+		if (acitve_tagfgsL > 9) tagfgsL = 9;
 
 		for (int i = 0; i < tagsL; i++) tags[i] = json_object_get_string(json_object_array_get_idx(tagsJSON, i));
 		if (tagsL < 1) {
 			tags[0] = "1";
 			tagsL = 1;
+		}
+
+		for (int i = 0; i < tagfgsL; i++) {
+			char *col = (char*) json_object_get_string(json_object_array_get_idx(tag_fgsJSON, i));
+			if (checkColor(col))
+				memcpy(tagfgs[i], col, 7);
+		}
+		for (int i = 0; i < acitve_tagfgsL; i++) {
+			char *col = (char*) json_object_get_string(json_object_array_get_idx(active_tag_fgsJSON, i));
+			if (checkColor(col))
+				memcpy(active_tagfgs[i], col, 7);
 		}
 
 		tag_count = tagsL;
@@ -3422,8 +3560,6 @@ main(int argc, char *argv[])
 
 		borderpx = json_object_get_int(borderpxJSON);
 		gappx = json_object_get_int(gapJSON);
-		vertpad = gappx;
-		sidepad = gappx;
 		snap = json_object_get_int(snapJSON);
 		showbar = json_object_get_int(showbarJSON);
 		topbar = json_object_get_int(topbarJSON);
@@ -3431,9 +3567,10 @@ main(int argc, char *argv[])
 		user_bh = json_object_get_int(barheightJSON);
 		systrayspacing = json_object_get_int(systrayspacingJSON);
 		showsystray = json_object_get_int(showsystrayJSON);
+		showicon = json_object_get_int(show_iconJSON);
 
-		if (checkColor((char*) json_object_get_string(col_gray1JSON)))
-			memcpy(col_gray1, json_object_get_string(col_gray1JSON), 7);
+		if (checkColor((char*) json_object_get_string(bar_backgroundJSON)))
+			memcpy(bar_background, json_object_get_string(bar_backgroundJSON), 7);
 
 		if (checkColor((char*) json_object_get_string(col_defborderJSON)))
 			memcpy(col_defborder, json_object_get_string(col_defborderJSON), 7);
@@ -3449,19 +3586,73 @@ main(int argc, char *argv[])
 
 		if (checkColor((char*) json_object_get_string(col_borderJSON)))
 			memcpy(col_border, json_object_get_string(col_borderJSON), 7);
+		
+		if (checkColor((char*) json_object_get_string(systray_bgJSON)))
+			memcpy(systraybg, json_object_get_string(systray_bgJSON), 7);
+		
+		if (checkColor((char*) json_object_get_string(bar_button_fgJSON)))
+			memcpy(bar_btnfg, json_object_get_string(bar_button_fgJSON), 7);
+		
+		if (checkColor((char*) json_object_get_string(title_fgJSON)))
+			memcpy(titlefg, json_object_get_string(title_fgJSON), 7);
 
+		if (strlen(json_object_get_string(bar_layoutJSON)) < 7) {
+			memcpy(barlayout, json_object_get_string(bar_layoutJSON), 6);
+			barlayout[6] = '\0';
+		}
+		if (strlen(json_object_get_string(bar_centerJSON)) == 0) {
+			center = '0';
+		} else {
+			center = json_object_get_string(bar_centerJSON)[0];
+		}
+
+		if (strlen(json_object_get_string(term_emulatorJSON)) > 0) {
+			memcpy(terminalEmulator, json_object_get_string(term_emulatorJSON), FILENAME_MAX-1);
+		}
+
+		int mod_mask = json_object_get_int(mod_keyJSON);
+		int mod_mask_num = Mod1Mask;
+		switch (mod_mask) {
+			case 1:
+				mod_mask_num = Mod1Mask;
+				break;
+			case 4:
+				mod_mask_num = Mod4Mask;
+				break;
+		}
+
+		for (int i = 0; i < LENGTH(keys); i++) {
+			Key *temp = &keys[i];
+			switch (temp->mod) {
+				case MODKEY:
+					temp->mod = mod_mask_num;
+					break;
+				case MODKEY|ShiftMask:
+					temp->mod = mod_mask_num|ShiftMask;
+					break;
+				case MODKEY|ControlMask:
+					temp->mod = mod_mask_num|ControlMask;
+					break;
+				case MODKEY|ControlMask|ShiftMask:
+					temp->mod = mod_mask_num|ControlMask|ShiftMask;
+					break;
+			}
+		}
 	}
 
+    current_tag = (1 << 0);
+
 	if (argc == 2 && !strcmp("-v", argv[1]))
-		die("firewm-"VERSION);
+		die("firewm-6.3");
+    else if (argc == 3 && !strcmp("-t", argv[1]))
+        current_tag = atoi(argv[2]);
 	else if (argc != 1)
-		die("usage: firewm [-v]");
+		die("usage: firewm -v -t");
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("dwm: cannot open display");
 	checkotherwm();
-	autostart_exec();
 	setup();
 #ifdef __OpenBSD__
 	if (pledge("stdio rpath proc exec", NULL) == -1)
@@ -3469,7 +3660,13 @@ main(int argc, char *argv[])
 #endif /* __OpenBSD__ */
 	scan();
 	run();
-	if(restart) execvp(argv[0], argv);
+	if(restart) {
+        char tag_base[3];
+        snprintf(tag_base, 3, "%d", current_tag);
+        tag_base[2] = '\0';
+
+        execvp(argv[0], (char *const[]) {argv[0], "-t", tag_base, NULL});
+    }
 	cleanup();
 	XCloseDisplay(dpy);
 	if (JSONroot != NULL) {

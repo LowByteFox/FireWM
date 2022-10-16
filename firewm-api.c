@@ -1,21 +1,3 @@
-/*
- * FireWM - Window Manager made in pure C, created on top of DWM
- * Copyright (C) 2022 Fire-The-Fox
- *
- * This program is free software: you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation, either version 3 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of  MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 void
 firesetalpha(const Arg *arg)
 {
@@ -35,29 +17,34 @@ firesetalpha(const Arg *arg)
 	updatebarpos(selmon);
 	updatesystray(0);
 
-	
 }
 
 void
 firesetgaps(const Arg *arg)
 {
 	selmon->gappx = arg->ui;
+	arrange(selmon);
+}
 
-	sidepad = selmon->gappx;
-	vertpad = selmon->gappx;
+void
+firesetbarpadding(const Arg *arg)
+{
+	int sidepad = arg->ui;
+	int vertpad = arg->ui;
 	sp = sidepad;
 	vp = (topbar == 1) ? vertpad : - vertpad;
+	barpadding = arg->ui;
 
 	Screen *src = ScreenOfDisplay(dpy, screen);
 
-	XMoveWindow(dpy, selmon->barwin, selmon->gappx, selmon->gappx);
-	XResizeWindow(dpy, selmon->barwin, src->width - 2 * selmon->gappx, user_bh ? user_bh : drw->fonts->h + 2);
+	XMoveWindow(dpy, selmon->barwin, barpadding, barpadding);
+	XResizeWindow(dpy, selmon->barwin, src->width - 2 * barpadding, user_bh ? user_bh : drw->fonts->h + 2);
 	updatesystray(1);
 	arrange(selmon);
 }
 
 void
-firesetcyan(const Arg *arg)
+firesetbarcolor(const Arg *arg)
 {
 	char *tempColor = (char*) arg->v;
 	if (checkColor(tempColor))

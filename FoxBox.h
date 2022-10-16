@@ -16,4 +16,4 @@ void FoxBox_Clean(FoxBox box);
 
 #endif
 
-#endif //FOXBOX_LIBRARY_H
+#endif

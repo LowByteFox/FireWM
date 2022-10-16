@@ -8,22 +8,23 @@
 #include <X11/keysymdef.h>
 
 /* appearance */
-unsigned int borderpx  = 1;        /* border pixel of windows */
-unsigned int gappx     = 10;        /* gaps between windows */
-unsigned int snap      = 32;       /* snap pixel */
-int showbar            = 1;        /* 0 means no bar */
-int topbar             = 1;        /* 0 means bottom bar */
-char *buttonbar        = "#";
-int user_bh            = 0;        /* 0 means that dwm will calculate bar height, >= 1 means dwm will user_bh as bar height */
-int vertpad            = 10;       /* vertical padding of bar */
-int sidepad            = 10;       /* horizontal padding of bar */
+unsigned int borderpx   = 1;        /* border pixel of windows */
+unsigned int gappx      = 10;       /* gaps between windows */
+unsigned int barpadding = 0;
+unsigned int snap       = 32;       /* snap pixel */
+int showbar             = 1;        /* 0 means no bar */
+int topbar              = 1;        /* 0 means bottom bar */
+char *buttonbar         = "#";
+int user_bh             = 0;        /* 0 means that dwm will calculate bar height, >= 1 means dwm will user_bh as bar height */
 static const unsigned int systraypinning = 0;   /* 0: sloppy systray follows selected monitor, >0: pin systray to monitor X */
 unsigned int systrayspacing = 2;   /* systray spacing */
 static const int systraypinningfailfirst = 1;   /* 1: if pinning fails, display systray on the first monitor, False: display systray on the last monitor*/
-int showsystray             = 1;   /* 0 means no systray */
+int showsystray        = 1;   /* 0 means no systray */
+static const int scalepreview       = 4;        /* tag preview scaling */
+int corner_radius      = 0;   /* Radius of corners */
 
-static const char *fonts[]          = { "Sans Serif:style=Bold:size=12", "fontawesome:size=16" };
-static const char dmenufont[]       = "monospace:size=11";
+static const char *fonts[]          = { "Sans Serif:style=Bold:size=12", "Font Awesome 5 Free:size=12", "Font Awesome 5 Brands:style=Solid:size=12", "Font Awesome 5 Free Solid:style=Solid:size=12" };
+static const char dmenufont[]       = "Sans Serif:size=12";
 
 /*
 A - App button
@@ -33,10 +34,11 @@ n - title
 s - status
 S - systray
 */
-char barlayout[7] = "AnTsS";
-char center = 'T';
 
-char col_gray1[]         = "#222222";
+char barlayout[7] = "ATLnsS";
+char center = '0';  /* Which "widget" should be in the center */
+
+char bar_background[]    = "#222222";
 char col_defborder[]     = "#444444";
 char foreground[]        = "#bbbbbb";
 char active_foreground[] = "#eeeeee";
@@ -44,10 +46,23 @@ char col_activebar[]     = "#0055aa";
 char col_border[]        = "#0055aa";
 char barfg[]			 = "#FFFFFF";
 char barbg[]			 = "#000000";
+char bar_btnfg[]         = "#FFFFFF";
+char titlefg[]           = "#FFFFFF";
+char systraybg[]         = "#000000";
+
+char tagfgs[9][8] = {
+	"#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"
+};  /* fg of tags */
+
+char active_tagfgs[9][8] = {
+	"#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"
+};  /* fg of active tag */
+
 
 int tag_count = 5;
+int showicon = 1;
 
-char terminalEmulator[FILENAME_MAX] = "xfce4-terminal";
+char terminalEmulator[FILENAME_MAX] = "st";  /* terminal emulator executable */
 
 static const char *upvol[]   = { "/usr/bin/pactl", "set-sink-volume", "0", "+5%",     NULL };
 static const char *downvol[] = { "/usr/bin/pactl", "set-sink-volume", "0", "-5%",     NULL };
@@ -58,19 +73,14 @@ static const unsigned int borderalpha = 255;
 
 static const char *colors[][3]      = {
 	/*               fg                 bg              border   */
-	[SchemeNorm] = { foreground,        col_gray1,      col_defborder },
+	[SchemeNorm] = { foreground,        bar_background, col_defborder },
 	[SchemeSel]  = { active_foreground, col_activebar,  col_border    }
 };
 
 static unsigned int alphas[][3]      = {
 	/*               fg      bg        border     */
-	[SchemeNorm] = { OPAQUE, baralpha, borderalpha },
-	[SchemeSel]  = { OPAQUE, baralpha, borderalpha }
-};
-
-static const char *const autostart[] = {
-	"/home/jani/devel/firewm/dwm/dwm-bar/dwm_bar.sh", NULL,
-	NULL /* terminate */
+	[SchemeNorm] = { OPAQUE, 245, 255 },
+	[SchemeSel]  = { OPAQUE, 245, 255 }
 };
 
 /* tagging */
@@ -81,7 +91,8 @@ static char lockfile[] = "/tmp/dwm.lock";
 
 static const Rule rules[] = {
 	/* class      instance    title       tags mask     isfloating   monitor */
-	{ "Gimp",     NULL,       NULL,       0,            1,           -1 },
+	{ "Gimp",     "Gimp",     NULL,       0,            1,           -1 },
+	{ "Plank",    NULL,       NULL,       (1 << 9) - 1, 1,           -1 }
 };
 
 /* layout(s) */
@@ -90,11 +101,12 @@ static const int nmaster     = 1;    /* number of clients in master area */
 static const int resizehints = 1;    /* 1 means respect size hints in tiled resizals */
 static const int lockfullscreen = 1; /* 1 will force focus on the fullscreen window */
 
+
 static const Layout layouts[] = {
 	/* symbol     arrange function */
 	{ "[]=",      tile },    /* first entry is default */
 	{ "><>",      NULL },    /* no layout function means floating behavior */
-	{ "[M]",      monocle },
+	{ "[M]",      monocle }
 };
 
 /* key definitions */
@@ -110,7 +122,8 @@ static const Layout layouts[] = {
 
 /* commands */
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
-static const char *dmenucmd[] = { "dmenu_run", "-m", dmenumon, "-fn", dmenufont, "-nb", col_gray1, "-nf", foreground, "-sb", col_activebar, "-sf", active_foreground, NULL };
+static const char *roficmd[] = {"/home/jani/.config/rofi/launchers/type-1/launcher.sh", NULL};
+static const char *dmenucmd[] = { "dmenu_run", "-m", dmenumon, "-fn", dmenufont, "-nb", bar_background, "-nf", foreground, "-sb", col_activebar, "-sf", active_foreground, NULL };
 static const char *termcmd[]  = { terminalEmulator, NULL };
 
 static Key keys[] = {
@@ -144,7 +157,7 @@ static Key keys[] = {
 	TAGKEYS(                        XK_9,                      8)
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
 	{ MODKEY,                       XK_o,      winview,        {0} },
-	{ MODKEY|ControlMask,		XK_r,      quit,           {1} }, 
+	{ MODKEY|ControlMask,			XK_r,      quit,           {1} }, 
 	{ 0,                       XF86XK_AudioLowerVolume, spawn, {.v = downvol } },
 	{ 0,                       XF86XK_AudioMute, spawn, {.v = mutevol } },
 	{ 0,                       XF86XK_AudioRaiseVolume, spawn, {.v = upvol   } },
@@ -158,7 +171,7 @@ static Button buttons[] = {
 	{ ClkLtSymbol,          0,              Button1,        setlayout,      {0} },
 	{ ClkTagBar,            0,              Button1,        view,           {0} },
 	{ ClkTagBar,            MODKEY,         Button1,        tag,            {0} },
-	{ ClkButton,		    0,		        Button1,	    spawn,		    {.v = dmenucmd } },
+	{ ClkButton,		    0,		        Button1,	    spawn,		    {.v = roficmd } },
 	{ ClkClientWin,         MODKEY,         Button1,        movemouse,      {0} },
 	{ ClkClientWin,         MODKEY,         Button2,        togglefloating, {0} },
 	{ ClkClientWin,         MODKEY,         Button3,        resizemouse,    {0} },
@@ -182,8 +195,9 @@ static IPCCommand ipccommands[] = {
   IPCCOMMAND(  quit,                1,      {ARG_TYPE_SINT}   ),
   IPCCOMMAND(  firesetalpha,        1,      {ARG_TYPE_UINT}   ),
   IPCCOMMAND(  firesetgaps,         1,      {ARG_TYPE_UINT}   ),
-  IPCCOMMAND(  firesetcyan,         1,      {ARG_TYPE_STR}    ),
+  IPCCOMMAND(  firesetbarcolor,     1,      {ARG_TYPE_STR}    ),
   IPCCOMMAND(  firesetbordercolor,  1,      {ARG_TYPE_STR}    ),
   IPCCOMMAND(  firesetbarlayout,    1,      {ARG_TYPE_STR}    ),
-  IPCCOMMAND(  firesetbarcenter,    1,      {ARG_TYPE_STR}   ),
+  IPCCOMMAND(  firesetbarcenter,    1,      {ARG_TYPE_STR}    ),
+  IPCCOMMAND(  firesetbarpadding,      1,      {ARG_TYPE_UINT}   )
 };
