@@ -17,8 +17,12 @@ after you are done with that
 it's time to compile
 
 ```sh
-sudo USER=`whoami` make clean install
-# the USER=`whoami` is required because you don't want to install configuration file into root's home directory
+sudo make clean install
+```
+to make editable config without recompilation
+
+```sh
+make config
 ```
 
 ### starting
@@ -29,34 +33,11 @@ Add the following line to your .xinitrc to start dwm using startx:
 exec firewm
 ```
 
-## FireWM API
-Now FireWM has it's own API, which allows you to change values such as alpha of bar or even gaps while FireWM is runnig!
-
-### What the API can do?
-For now the API can change gaps and alpha of bar
-
-to change gaps run:
-```sh
-# size must be >= 0
-firewm-msg run_command firesetgaps {size}
-```
-
-to change alpha of bar run:
-```sh
-# opacity must be >= 0
-# recommended maximum number is 255 but nothing will happen if you provide higher number
-firewm-msg run_command firesetalpha {opacity}
-```
-
 ## Screenshots
 
 ## Known bugs
-It looks like icon patch doesn't like changing monitors; for example turning one off using xrandr <br>
-Make sure when setting status color that you also provide foreground; ^#FF3333:#000000Text ( and not like this ^#FF3333Text ) <br>
-Order matters when setting bar layout
+Do I even know? 💀
 
 ## Changelog
-* Now you can set color to the status bar
-* Fixed bugs
-* Created bugs
+Do I even know? 💀
 
