@@ -37,7 +37,7 @@ exec firewm
 ![Screenshot1](./screenshots/example1.png)
 
 ## Known bugs
-Do I even know? 💀
+Button for changing layouts doesn't work
 
 ## Changelog
 Do I even know? 💀
