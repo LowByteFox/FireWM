@@ -1,3 +1,7 @@
+#ifndef UTIL_H
+#define UTIL_H
+
+#include <stdio.h>
 /* See LICENSE.dwm file for copyright and license details. */
 
 #define MAX(A, B)               ((A) > (B) ? (A) : (B))
@@ -16,3 +20,4 @@ int normalizepath(const char *path, char **normal);
 int mkdirp(const char *path);
 int parentdir(const char *path, char **parent);
 int nullterminate(char **str, size_t *len);
+#endif

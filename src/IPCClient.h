@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <sys/epoll.h>
 
+#include "firewm.h"
+
 typedef struct IPCClient IPCClient;
 /**
  * This structure contains the details of an IPC Client and pointers for a

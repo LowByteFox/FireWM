@@ -4,6 +4,8 @@
 #include <string.h>
 #include <yajl/yajl_gen.h>
 
+#include "firewm.h"
+
 #define YSTR(str) yajl_gen_string(gen, (unsigned char *)str, strlen(str))
 #define YINT(num) yajl_gen_integer(gen, num)
 #define YDOUBLE(num) yajl_gen_double(gen, num)
