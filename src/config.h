@@ -1,3 +1,5 @@
+#ifndef CONFIG_H
+#define CONFIG_H
 /* See LICENSE.dwm file for copyright and license details. */
 
 #define ICONSIZE 16   /* icon size */
@@ -6,6 +8,8 @@
 
 #include <X11/XF86keysym.h>
 #include <X11/keysymdef.h>
+#include "firewm.h"
+#include "ipc.h"
 
 /* appearance */
 unsigned int borderpx   = 1;        /* border pixel of windows */
@@ -131,10 +135,8 @@ static Key keys[] = {
 	{ MODKEY,                       XK_p,      spawn,          {.v = dmenucmd } },
 	{ MODKEY|ShiftMask,             XK_Return, spawn,          {.v = termcmd } },
 	{ MODKEY,                       XK_b,      togglebar,      {0} },
-	// { MODKEY,                       XK_j,      focusstack,     {.i = +1 } },
-	// { MODKEY,                       XK_k,      focusstack,     {.i = -1 } },
 	{ MODKEY,                       XK_i,      incnmaster,     {.i = +1 } },
-	{ MODKEY,                       XK_d,      incnmaster,     {.i = -1 } },
+	{ MODKEY,                       XK_o,      incnmaster,     {.i = -1 } },
 	{ MODKEY,                       XK_k,      setmfact,       {.f = -0.05} },
 	{ MODKEY,                       XK_l,      setmfact,       {.f = +0.05} },
 	{ MODKEY,                       XK_Return, zoom,           {0} },
@@ -201,3 +203,5 @@ static IPCCommand ipccommands[] = {
   IPCCOMMAND(  firesetbarcenter,    1,      {ARG_TYPE_STR}    ),
   IPCCOMMAND(  firesetbarpadding,      1,      {ARG_TYPE_UINT}   )
 };
+
+#endif

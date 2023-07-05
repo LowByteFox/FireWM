@@ -20,6 +20,8 @@ add_compile_definitions(
     VERSION="6.3"
 )
 
+set(CMAKE_INSTALL_PREFIX /usr/local/)
+
 # C++ config
 message("Configuring C++")
 set(CMAKE_CXX_STANDARD 20)
@@ -38,3 +40,5 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -rdynamic -pedantic -Wall -Wno-deprecated-de
 message("Configuring executables")
 add_executable(firewm ${SRC})
 target_link_libraries(firewm Xinerama fontconfig Xft X11 Xrender Xext Imlib2 FoxString json-c yajl pthread FoxBox)
+
+install(TARGETS firewm)
