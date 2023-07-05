@@ -2019,6 +2019,10 @@ setmfact(const Arg *arg)
 	arrange(selmon);
 }
 
+void sigchld_handler(int signum) {
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
 void
 setup(void)
 {
@@ -2028,6 +2032,12 @@ setup(void)
 
 	signal(SIGHUP, sighup);
 	signal(SIGTERM, sigterm);
+
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGCHLD, &sa, NULL);
 
 	/* init screen */
 	screen = DefaultScreen(dpy);
